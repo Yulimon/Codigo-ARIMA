@@ -1,0 +1,171 @@
+
+'ARIMA'
+
+'Paso 1 : Prueba de estacionariedad'
+
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+
+
+
+demanda = pd.read_csv('C:/Users/Usuario/Desktop/"nombre del archivo".csv', encoding='latin-1', index_col= 'Mes')
+
+demanda.index= pd.to_datetime(demanda.index)
+seriedetiempo = demanda['familia']
+
+type(seriedetiempo)
+
+seriedetiempo.rolling(12).mean().plot(label = 'Media movil 12 meses')
+seriedetiempo.rolling(12).std().plot(label = 'Sigma 12 meses')
+
+seriedetiempo.plot()
+
+'Para que funcione la leyenda debe estar todo junto con las series de tiempo de arriba'
+plt.legend()
+
+'Prueba de Dickey-Fuller aumentada'
+
+from statsmodels.tsa.stattools import adfuller
+
+resultadoad= adfuller(demanda['familia'])
+'primer valor: estadistico de ADFuller, segundo valor: P value, tercer valor: numero de retrasos, Cuarto valor: observaciones realizadas'
+'porcentajes: numeros de la prueba'
+
+'los datos son estacionarios ya que el p valor es 0.0251026327456766 que es menor que 0.05, rechazando la hipotesis del estudio'
+' puesto que la hipotesis de este estudio es que la serie no es estacionaria'
+
+'Paso 2 : Diferencia sin tomar en cuenta la estacionalidad'
+
+demanda['Primera Diferencia'] = demanda['familia'] - demanda['familia'].shift(1)
+'Shift(X) para tomar un valor de X periodos anteriores; se pueden tomar esta serie de datos'
+
+demanda['Primera Diferencia'].plot()
+'Quita la tendencia pero no la estacionariedad'
+
+adfuller(demanda['Primera Diferencia'].dropna())
+'comprobar si tiene estacionalidad; se puede tomar esta serie de datos'
+
+demanda['Segunda Diferencia'] = demanda['Primera Diferencia'] - demanda['Primera Diferencia'].shift(1)
+
+'Diferencia CON estacionalidad'
+
+demanda['Diferencia Estacionalidad'] = demanda['familia']-demanda['familia'].shift(12)
+
+adfuller(demanda['Diferencia Estacionalidad'].dropna())
+
+'Se puede trabajar con esta serie de datos'
+
+demanda['Primera Diferencia con Estacionalidad'] = demanda['Primera Diferencia'] - demanda['Primera Diferencia'].shift(12)
+
+demanda['Primera Diferencia con Estacionalidad'].plot()
+
+adfuller(demanda['Primera Diferencia con Estacionalidad'].dropna())
+
+'Parametros ???: D=estacionalidad  , d: primera diferencia , s: parametro de tiempo '
+
+
+'Paso 3: Partir base'
+
+demanda
+
+pd.set_option('display.max_columns', None)
+'Comando Pandas para mostrar todas las columnas'
+
+'Crear una base de datos con A teniendo el 80% de los datos y B el 20%, es algo aproximado '
+baseA = demanda[0:40]
+
+baseB = demanda[40:52]
+
+"demanda['X cosa'].plot() 'grafica un dato exacto que se desee en el grafico'"
+
+
+'Paso 4 Segmento A: grafico de autocorrelacion (ACF) y autocorrelacion particial (PACF)'
+
+from statsmodels.graphics.tsaplots import plot_acf , plot_pacf
+
+plot_acf(baseA['Diferencia Estacionalidad'].dropna(), lags = 27) 
+'usar lags para asignar la cantidad de datos a usar'
+
+plot_pacf(baseA['Diferencia Estacionalidad'].dropna(), lags = 27)
+
+
+acf1 = plot_acf(baseA['Primera Diferencia con Estacionalidad'].dropna() , lags= 26)
+
+'Paso 4 Segmento B: definicion de comportentes de autoregresion(AR)  y moving average(MA)'
+
+'q= parte no estacional(no tiene que ver con los meses) nos fijamos en los primeros numeros'
+'Q= parte estacional, nos fijamos en  los meses, 12, 24, 36, 48... meses '
+'ACF'
+'Probar q= 1 o 2'
+'Probar Q= 0'
+
+'PACF'
+'Probar p= 1 o 2 '
+'Probar P = 1'
+'parametros (p,d,q) = (1,1,1) o (2,1,2)
+'parametros (P,D,Q,s) = (1,1,0,12)' 
+'Paso 5 : Construccion del modelo '
+
+from statsmodels.tsa.arima_model import ARIMA
+
+modelo = sm.tsa.statespace.SARIMAX( baseA['familia'], order=(1,1,2), seasonal_order= (1,1,0,12))
+resultados = modelo.fit()
+print(resultados.summary())
+
+
+'Paso 6 seccion A : Pronostico'
+
+baseA['Pronostico']= resultados.predict()
+
+baseA[['familia','Pronostico']].plot()
+
+'Agregar filas con fechas futuras'
+
+from pandas.tseries.offsets  import DateOffset
+'Funcion que ayuda generar fechas futuras'
+
+fechasfuturas = [baseA.index[-1] + DateOffset(months = x) for x in range(1,13)]
+
+'Month solo para meses entre 1 y 12, MonthS para agregar una cantidad n de meses a la serie'
+
+df_futura = pd.DataFrame(index = fechasfuturas, columns = baseA.columns)
+
+nuevabaseA = pd.concat([baseA, df_futura])
+
+'pd.concat para concatenarbases se datos'
+
+
+nuevabaseA['Pronostico'] = resultados.predict(start = 40, end = 52)
+
+nuevabaseA[['familia', 'Pronostico']].plot()
+
+
+demanda['familia'].plot()
+nuevabaseA['Pronostico'].plot()
+plt.legend()
+'grafico pronostico vs demanda real'
+
+'Paso 6 seccion B: validacion del modelo '
+
+pronostico_df = pd.DataFrame(index=fechasfuturas)
+'crear una variable con el contenido de la columna principal (index) con las fechas de fechasfuturas'
+
+pronostico_df['Pronostico'] = nuevabaseA['Pronostico'][40:52]
+
+nuevabaseB = baseB.merge(pronostico_df, left_index = True, right_index = True)
+
+nuevabaseB[['familia', 'Pronostico']].plot()
+
+from sklearn.metrics import mean_squared_error
+
+rmse = np.sqrt(mean_squared_error(nuevabaseB['familia'], nuevabaseB['Pronostico']))
+
+
+from sklearn.metrics import mean_absolute_percentage_error
+
+mape = mean_absolute_percentage_error(nuevabaseB['familia'], nuevabaseB['Pronostico'])
+
+"codigo para exportar a csv"
+nuevabaseA.to_csv('C:/Users/Usuario/Desktop/jeje.csv')
